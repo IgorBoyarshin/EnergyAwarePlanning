@@ -27,25 +27,6 @@ struct Processor {
 // ============================================================================
 // ============================================================================
 // ============================================================================
-template <typename T>
-T& withId(int id, std::vector<T>& ts) noexcept {
-    for (T& t : ts) {
-        if (t.id == id) return t;
-    }
-    std::cout << "::> No T with id " << id << '\n';
-    exit(-1);
-}
-template <typename T>
-const T& withId(int id, const std::vector<T>& ts) noexcept {
-    for (const T& t : ts) {
-        if (t.id == id) return t;
-    }
-    std::cout << "::> No T with id " << id << '\n';
-    exit(-1);
-}
-// ============================================================================
-// ============================================================================
-// ============================================================================
 struct Transfer {
     int src, dst, volume;
     Transfer(int src, int dst, int volume) noexcept : src(src), dst(dst), volume(volume) {}
@@ -57,27 +38,26 @@ struct TransferTo {
 };
 
 struct Task {
-    int id;
     std::vector<int> weights;
     std::vector<int> energies;
     std::vector<TransferTo> targets;
 
-    Task(int id, std::vector<int>&& weights, std::vector<int>&& energies) noexcept
-        : id(id), weights(std::move(weights)), energies(std::move(energies)) {}
+    int policy = 0;
+
+    Task(std::vector<int>&& weights, std::vector<int>&& energies) noexcept
+        : weights(std::move(weights)), energies(std::move(energies)) {}
 };
 
 struct TaskGraph {
     std::vector<Task> tasks;
     std::vector<Transfer> transfers; // redundant. for convenience
 
-    Task& taskWithId(int id) noexcept { return withId(id, tasks); }
-    const Task& taskWithId(int id) const noexcept { return withId(id, tasks); }
-    void add(int id, std::vector<int>&& weights, std::vector<int>&& energies) noexcept {
-        tasks.emplace_back(id, std::move(weights), std::move(energies));
+    void add(std::vector<int>&& weights, std::vector<int>&& energies) noexcept {
+        tasks.emplace_back(std::move(weights), std::move(energies));
     }
     void addTransfer(int src, int dst, int volume) noexcept {
         transfers.emplace_back(src, dst, volume);
-        taskWithId(src).targets.emplace_back(dst, volume);
+        tasks[src].targets.emplace_back(dst, volume);
     }
 };
 
@@ -85,78 +65,70 @@ struct TaskGraph {
 bool allGoodFrom(int id, std::vector<int> visited, const TaskGraph& taskGraph) noexcept {
     if (std::find(visited.begin(), visited.end(), id) != visited.end()) return false;
     visited.push_back(id);
-    const auto& targets = taskGraph.taskWithId(id).targets;
+    const auto& targets = taskGraph.tasks[id].targets;
     for (const auto& [dst, _volume] : targets) {
         if (!allGoodFrom(dst, visited, taskGraph)) return false;
     }
     return true;
 }
 
-bool cyclesExist(const TaskGraph& taskGraph) noexcept {
-    std::vector<int> sourceIds;
-    for (const auto& [id, _weights, _energies, _targets] : taskGraph.tasks) sourceIds.push_back(id);
-    for (const auto& [id, _weights, _energies, targets] : taskGraph.tasks) {
-        for (const auto& [dst, _volume] : targets) {
-            const auto pos = std::find(sourceIds.begin(), sourceIds.end(), dst);
-            if (pos != sourceIds.end()) sourceIds.erase(pos);
-        }
-    }
-
-    if (sourceIds.empty()) return true;
-    for (int id : sourceIds) {
+bool cyclesExist(const TaskGraph& taskGraph, const std::vector<int>& rootTaskIndices) noexcept {
+    if (rootTaskIndices.empty()) return true;
+    for (int id : rootTaskIndices) {
         if (!allGoodFrom(id, {}, taskGraph)) return true;
     }
     return false;
 }
-
-// bool hangingNodesExist(const TaskGraph& taskGraph) noexcept {
-//     std::vector<int> endingNodes;
-//     for (const auto& [id, _weight, targets] : taskGraph.tasks) {
-//         if (targets.empty()) { // ending node
-//             bool found = false;
-//             for (const auto& [_src, dst, _volume] : taskGraph.transfers) {
-//                 if (dst == id) {
-//                     found = true;
-//                     break;
-//                 }
-//             }
-//             if (!found) {
-//                 std::cout << ":> Hanging Node with id = " << id << '\n';
-//                 return true;
-//             }
-//         }
-//     }
-//     return false;
-// }
 // ============================================================================
 // ============================================================================
 // ============================================================================
-TaskGraph readTaskGraph(std::string_view path) {
+std::optional<TaskGraph> readTaskGraph(std::string_view path) {
     TaskGraph taskGraph;
     std::ifstream file(path.data());
     char type;
     file >> type;
     if (type != 'V') {
         std::cout << "::> Expected voltage levels amount (V) to be the first entry.\n";
-        exit(-1);
+        return std::nullopt;
     }
 
     unsigned int voltageLevelsAmount;
     file >> voltageLevelsAmount;
 
+    file >> type;
+    if (type != 'I') {
+        std::cout << "::> Expected indexing specification to be the second entry.\n";
+        return std::nullopt;
+    }
+    file >> type;
+    bool indexingFromZero;
+    if (type == '0') indexingFromZero = true;
+    else if (type == '1') indexingFromZero = false;
+    else {
+        std::cout << "::> Unexpected indexing specification.\n";
+        return std::nullopt;
+    }
+
+    int expectedId = indexingFromZero ? 0 : 1;
     while (file >> type) {
         if (type == 'T') {
             int id;
             std::vector<int> weights(voltageLevelsAmount);
             std::vector<int> energies(voltageLevelsAmount);
             file >> id >> type;
+            if (expectedId != id) {
+                std::cout << "::> Unexpected indexing while listing Tasks.\n";
+                return std::nullopt;
+            }
+            expectedId++;
             for (unsigned int i = 0; i < voltageLevelsAmount; i++) file >> weights[i];
             file >> type;
             for (unsigned int i = 0; i < voltageLevelsAmount; i++) file >> energies[i];
-            taskGraph.add(id, std::move(weights), std::move(energies));
+            taskGraph.add(std::move(weights), std::move(energies));
         } else if (type == 'S') {
             int from, to, volume;
             file >> from >> type >> to >> type >> volume;
+            if (!indexingFromZero) { from--; to--; }
             taskGraph.addTransfer(from, to, volume);
         } else {
             std::cout << "::> Unexpected beginning of a line in " << path << ":" << type << '\n';
@@ -164,20 +136,99 @@ TaskGraph readTaskGraph(std::string_view path) {
         }
     }
 
-    return taskGraph;
+    return { taskGraph };
+}
+// ============================================================================
+// ============================================================================
+// ============================================================================
+std::vector<int> getRootTasks(const TaskGraph& taskGraph) {
+    std::vector<bool> taskIsDestination(taskGraph.tasks.size(), false);
+    for (const auto& [_src, dst, _volume] : taskGraph.transfers) taskIsDestination[dst] = true;
+
+    std::vector<int> rootTaskIndices;
+    for (unsigned int i = 0; i < taskIsDestination.size(); i++) {
+        if (!taskIsDestination[i]) rootTaskIndices.push_back(i);
+    }
+
+    return rootTaskIndices;
+}
+
+void calculateWeightFrom(int srcIndex, int selfIndex, int cumulativeWeight,
+        std::vector<std::pair<int, int>>& weightFor, const TaskGraph& taskGraph) {
+    const auto& selfTask = taskGraph.tasks[selfIndex];
+    const int selfWeight = selfTask.weights[selfTask.policy];
+    const int newWeight = cumulativeWeight + selfWeight;
+    bool mustContinue = weightFor[selfIndex].first == -1; // not initialized
+    if (weightFor[selfIndex].first < newWeight) {
+        weightFor[selfIndex].first = newWeight;
+        weightFor[selfIndex].second = srcIndex;
+        mustContinue = true; // to recalculate from here on
+    }
+    if (!mustContinue) return;
+    const int resultingWeight = weightFor[selfIndex].first;
+    for (const auto& [dstIndex, _] : selfTask.targets) {
+        calculateWeightFrom(selfIndex, dstIndex, resultingWeight, weightFor, taskGraph);
+    }
+}
+
+
+std::pair<std::vector<int>, int> findReversedCriticalPath(const TaskGraph& taskGraph,
+        const std::vector<int>& rootTasks) noexcept {
+    // <cumulative sum, from where>
+    std::vector<std::pair<int, int>> weightFor(taskGraph.tasks.size(), std::make_pair(-1, -1));
+    for (int i : rootTasks) calculateWeightFrom(-1, i, 0, weightFor, taskGraph);
+
+    // Find max cumulative weight
+    int maxIndex = -1;
+    int max = -1;
+    for (unsigned int i = 0; i < weightFor.size(); i++) {
+        const auto& [w, _] = weightFor[i];
+        if (w > max) {
+            max = w;
+            maxIndex = i;
+        }
+    }
+
+    std::vector<int> criticalPath;
+    int curr = maxIndex;
+    while (curr != -1) {
+        criticalPath.push_back(curr);
+        curr = weightFor[curr].second;
+    }
+
+    return std::make_pair(std::move(criticalPath), weightFor[maxIndex].first);
 }
 // ============================================================================
 // ============================================================================
 // ============================================================================
 int main() {
-    const TaskGraph taskGraph = readTaskGraph("taskGraph.txt");
-    if (cyclesExist(taskGraph)) {
+    const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
+    if (!taskGraphOpt) return -1;
+    TaskGraph taskGraph = *taskGraphOpt;
+    const std::vector<int> rootTasks = getRootTasks(taskGraph);
+
+    if (cyclesExist(taskGraph, rootTasks)) {
         std::cout << "::> Cycles detected in tasks graph" << '\n';
-        exit(-1);
+        return -1;
+    }
+    if (taskGraph.tasks.empty()) {
+        std::cout << "Nothing to do...\n";
+        return -1;
     }
 
     std::cout << "===============================================" << '\n';
-    std::vector<Processor> units;
+    const auto PROCESSORS_COUNT = 3;
+    std::vector<Processor> processors(PROCESSORS_COUNT);
+
+    // Start by specifying the slowest(last) policy for each Task.
+    const auto POLICIES_COUNT = taskGraph.tasks.front().weights.size();
+    for (auto& task : taskGraph.tasks) task.policy = POLICIES_COUNT - 1;
+
+    const auto cp = findReversedCriticalPath(taskGraph, rootTasks);
+    std::cout << "CP=" << cp.second << '\n';
+    for (int i : cp.first) {
+        std::cout << i << '\n';
+    }
 
     return 0;
 }
