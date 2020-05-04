@@ -43,6 +43,11 @@ struct Task {
     std::vector<TransferTo> targets;
 
     int policy = 0;
+    std::optional<int> early = std::nullopt;
+    std::optional<int> late = std::nullopt;
+
+    int weight() const noexcept { return weights[policy]; }
+    void clearStats() noexcept { early = std::nullopt; late = std::nullopt; }
 
     Task(std::vector<int>&& weights, std::vector<int>&& energies) noexcept
         : weights(std::move(weights)), energies(std::move(energies)) {}
@@ -51,7 +56,9 @@ struct Task {
 struct TaskGraph {
     std::vector<Task> tasks;
     std::vector<Transfer> transfers; // redundant. for convenience
+    bool indexingFromZero; // to determine what output the User expects
 
+    TaskGraph(bool indexingFromZero) noexcept : indexingFromZero(indexingFromZero) {}
     void add(std::vector<int>&& weights, std::vector<int>&& energies) noexcept {
         tasks.emplace_back(std::move(weights), std::move(energies));
     }
@@ -83,7 +90,6 @@ bool cyclesExist(const TaskGraph& taskGraph, const std::vector<int>& rootTaskInd
 // ============================================================================
 // ============================================================================
 std::optional<TaskGraph> readTaskGraph(std::string_view path) {
-    TaskGraph taskGraph;
     std::ifstream file(path.data());
     char type;
     file >> type;
@@ -109,6 +115,7 @@ std::optional<TaskGraph> readTaskGraph(std::string_view path) {
         return std::nullopt;
     }
 
+    TaskGraph taskGraph(indexingFromZero);
     int expectedId = indexingFromZero ? 0 : 1;
     while (file >> type) {
         if (type == 'T') {
@@ -153,61 +160,122 @@ std::vector<int> getRootTasks(const TaskGraph& taskGraph) {
     return rootTaskIndices;
 }
 
-void calculateWeightFrom(int srcIndex, int selfIndex, int cumulativeWeight,
-        std::vector<std::pair<int, int>>& weightFor, const TaskGraph& taskGraph) {
-    const auto& selfTask = taskGraph.tasks[selfIndex];
-    const int selfWeight = selfTask.weights[selfTask.policy];
-    const int newWeight = cumulativeWeight + selfWeight;
-    bool mustContinue = weightFor[selfIndex].first == -1; // not initialized
-    if (weightFor[selfIndex].first < newWeight) {
-        weightFor[selfIndex].first = newWeight;
-        weightFor[selfIndex].second = srcIndex;
-        mustContinue = true; // to recalculate from here on
+// void calculateWeightFrom(int srcIndex, int selfIndex, int cumulativeWeight,
+//         std::vector<std::pair<int, int>>& weightFor, const TaskGraph& taskGraph) {
+//     const auto& selfTask = taskGraph.tasks[selfIndex];
+//     const int selfWeight = selfTask.weights[selfTask.policy];
+//     const int newWeight = cumulativeWeight + selfWeight;
+//     bool mustContinue = weightFor[selfIndex].first == -1; // not initialized
+//     if (weightFor[selfIndex].first < newWeight) {
+//         weightFor[selfIndex].first = newWeight;
+//         weightFor[selfIndex].second = srcIndex;
+//         mustContinue = true; // to recalculate from here on
+//     }
+//     if (!mustContinue) return;
+//     const int resultingWeight = weightFor[selfIndex].first;
+//     for (const auto& [dstIndex, _] : selfTask.targets) {
+//         calculateWeightFrom(selfIndex, dstIndex, resultingWeight, weightFor, taskGraph);
+//     }
+// }
+
+
+// std::pair<std::vector<int>, int> findReversedCriticalPath(const TaskGraph& taskGraph,
+//         const std::vector<int>& rootTasks) noexcept {
+//     // <cumulative sum, from where>
+//     std::vector<std::pair<int, int>> weightFor(taskGraph.tasks.size(), std::make_pair(-1, -1));
+//     for (int i : rootTasks) calculateWeightFrom(-1, i, 0, weightFor, taskGraph);
+//
+//     // Find max cumulative weight
+//     int maxIndex = -1;
+//     int max = -1;
+//     for (unsigned int i = 0; i < weightFor.size(); i++) {
+//         const auto& [w, _] = weightFor[i];
+//         if (w > max) {
+//             max = w;
+//             maxIndex = i;
+//         }
+//     }
+//
+//     std::vector<int> criticalPath;
+//     int curr = maxIndex;
+//     while (curr != -1) {
+//         criticalPath.push_back(curr);
+//         curr = weightFor[curr].second;
+//     }
+//
+//     return std::make_pair(std::move(criticalPath), weightFor[maxIndex].first);
+// }
+
+std::optional<int> findTaskToSpeedup(const std::vector<int>& path, const TaskGraph& taskGraph) {
+    // Find the first Task with 'INCable' policy
+    for (int id : path) {
+        if (taskGraph.tasks[id].policy > 0) return { id };
     }
-    if (!mustContinue) return;
-    const int resultingWeight = weightFor[selfIndex].first;
-    for (const auto& [dstIndex, _] : selfTask.targets) {
-        calculateWeightFrom(selfIndex, dstIndex, resultingWeight, weightFor, taskGraph);
-    }
+    return std::nullopt;
 }
 
+int recalculateStatsFrom(int id, int parentCumulativeWeight, TaskGraph& taskGraph) {
+    auto& task = taskGraph.tasks[id];
 
-std::pair<std::vector<int>, int> findReversedCriticalPath(const TaskGraph& taskGraph,
-        const std::vector<int>& rootTasks) noexcept {
-    // <cumulative sum, from where>
-    std::vector<std::pair<int, int>> weightFor(taskGraph.tasks.size(), std::make_pair(-1, -1));
-    for (int i : rootTasks) calculateWeightFrom(-1, i, 0, weightFor, taskGraph);
+    // Set Early
+    if (!task.early || (*task.early < parentCumulativeWeight)) task.early = { parentCumulativeWeight };
 
-    // Find max cumulative weight
-    int maxIndex = -1;
-    int max = -1;
-    for (unsigned int i = 0; i < weightFor.size(); i++) {
-        const auto& [w, _] = weightFor[i];
-        if (w > max) {
-            max = w;
-            maxIndex = i;
+    // Set Late
+    int min = 0; // find max cumulative time, but treat as min because they are stored negative
+    for (const auto& [i, _] : task.targets) {
+        const int targetLateTime = recalculateStatsFrom(i, *task.early + task.weight(), taskGraph);
+        if (targetLateTime < min) min = targetLateTime;
+    }
+    const int maybeNewLate = min - task.weight();
+    if (!task.late || (*task.late > maybeNewLate)) task.late = { maybeNewLate };
+
+    return *task.late;
+}
+
+std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const std::vector<int>& rootTaskIndices) {
+    for (auto& task : taskGraph.tasks) task.clearStats();
+
+    int criticalTime = 0; // they are stored negative
+    int criticalPathRoot;
+    for (int id : rootTaskIndices) {
+        const int maybeCriticalTime = recalculateStatsFrom(id, 0, taskGraph);
+        if (maybeCriticalTime < criticalTime) {
+            criticalTime = maybeCriticalTime;
+            criticalPathRoot = id;
         }
     }
 
     std::vector<int> criticalPath;
-    int curr = maxIndex;
-    while (curr != -1) {
-        criticalPath.push_back(curr);
-        curr = weightFor[curr].second;
+    int currId = criticalPathRoot;
+    while (!taskGraph.tasks[currId].targets.empty()) {
+        const auto& curr = taskGraph.tasks[currId];
+        criticalPath.push_back(currId);
+        const int expectedTargetLate = *curr.late + curr.weight();
+        for (const auto& [id, _] : curr.targets) {
+            if (*taskGraph.tasks[id].late == expectedTargetLate) {
+                currId = id;
+                break;
+            }
+            std::cout << "::> Logic error in recalculateStats().\n";
+            exit(-1);
+        }
     }
+    criticalPath.push_back(currId);
 
-    return std::make_pair(std::move(criticalPath), weightFor[maxIndex].first);
+    return std::make_pair(criticalPath, -criticalTime);
 }
 // ============================================================================
 // ============================================================================
 // ============================================================================
 int main() {
+    const int DESIRED_TIME = 11;
+
     const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
     if (!taskGraphOpt) return -1;
     TaskGraph taskGraph = *taskGraphOpt;
-    const std::vector<int> rootTasks = getRootTasks(taskGraph);
+    const std::vector<int> rootTaskIndices = getRootTasks(taskGraph);
 
-    if (cyclesExist(taskGraph, rootTasks)) {
+    if (cyclesExist(taskGraph, rootTaskIndices)) {
         std::cout << "::> Cycles detected in tasks graph" << '\n';
         return -1;
     }
@@ -224,11 +292,19 @@ int main() {
     const auto POLICIES_COUNT = taskGraph.tasks.front().weights.size();
     for (auto& task : taskGraph.tasks) task.policy = POLICIES_COUNT - 1;
 
-    const auto cp = findReversedCriticalPath(taskGraph, rootTasks);
-    std::cout << "CP=" << cp.second << '\n';
-    for (int i : cp.first) {
-        std::cout << i << '\n';
+    auto [criticalPath, criticalTime] = recalculateStats(taskGraph, rootTaskIndices);
+    while (criticalTime > DESIRED_TIME) {
+        const auto taskToSpeedupOpt = findTaskToSpeedup(criticalPath, taskGraph);
+        if (!taskToSpeedupOpt) {
+            std::cout << ":> The critical path on best performance does not meet the desired time.\n";
+            return 0;
+        }
+        taskGraph.tasks[*taskToSpeedupOpt].policy--; // improve performance of this Task
+        const auto [newCriticalPath, newCriticalTime] = recalculateStats(taskGraph, rootTaskIndices);
+        criticalPath = std::move(newCriticalPath);
+        criticalTime = newCriticalTime;
     }
+
 
     return 0;
 }
