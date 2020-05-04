@@ -24,6 +24,14 @@ struct Processor {
     std::vector<ProcessingEvent> processingTimeline;
     std::vector<TransferEvent> transferTimeline;
 
+    int finishedAt() const noexcept {
+        int max = 0;
+        for (const auto& [_start, finish, _id] : processingTimeline) {
+            if (finish > max) max = finish;
+        }
+        return max;
+    }
+
     int availableAt(int duration, int let) const noexcept {
         bool conflict = true;
         while (conflict) {
@@ -389,6 +397,12 @@ int main() {
 
     const auto CORES_COUNT = 3;
     const auto cores = planning(taskGraph, rootTaskIndices, CORES_COUNT);
+    int totalTime = 0;
+    for (const auto& processor : cores) {
+        const int finish = core.finishedAt();
+        if (finish > totalTime) totalTime = finish;
+    }
+    std::cout << "Total time = " << totalTime << '\n';
 
     int coreId = 0;
     for (const auto& processor : cores) {
