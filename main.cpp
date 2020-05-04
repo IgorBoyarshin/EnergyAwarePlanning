@@ -65,6 +65,12 @@ struct Task {
     int delta() const noexcept { return *late - *early; }
     int weight() const noexcept { return weights[policy]; }
     void clearStats() noexcept { early = std::nullopt; late = std::nullopt; }
+    int volumeOfTargetTo(int id) const noexcept {
+        for (const auto& [dst, volume] : targets) {
+            if (dst == id) return volume;
+        }
+        return -1;
+    }
 
     Task(std::vector<int>&& weights, std::vector<int>&& energies) noexcept
         : weights(std::move(weights)), energies(std::move(energies)) {}
@@ -262,17 +268,13 @@ std::vector<Processor> planning(const TaskGraph& taskGraph, const std::vector<in
     // We've found the most urgent Task among the ready ones
     const auto determineAssignmentCore = [&processors, &taskGraph, &assignmentOf](int taskId){
         int bestTime = -1;
-        int bestCore;
+        unsigned int bestCore;
         for (unsigned int core = 0; core < processors.size(); core++) {
             int dataReadyAt = 0;
             for (int parent : taskGraph.tasks[taskId].parents) {
                 if (assignmentOf[parent].first == core) continue;
                 const int parentFinishedAt = assignmentOf[parent].second;
-                const auto& parentTargets = taskGraph.tasks[parent].targets;
-                int transferTime;
-                for (const auto& [dst, volume] : parentTargets) {
-                    if (dst == taskId) { transferTime = volume; break; }
-                }
+                const int transferTime = taskGraph.tasks[parent].volumeOfTargetTo(taskId);
                 const int newDataReadyAt = parentFinishedAt + transferTime;
                 if (newDataReadyAt > dataReadyAt) dataReadyAt = newDataReadyAt;
             }
@@ -299,13 +301,21 @@ std::vector<Processor> planning(const TaskGraph& taskGraph, const std::vector<in
             }
         }
 
-        std::cout << "Shall assign " << taskToAssign << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
+        std::cout << "Shall assign " << taskToAssign
+            << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
 
         // Assign
         const auto [core, startTime] = determineAssignmentCore(taskToAssign);
         const int finishTime = startTime + taskGraph.tasks[taskToAssign].weight();
         assignmentOf[taskToAssign] = std::make_pair(core, finishTime);
         processors[core].processingTimeline.emplace_back(startTime, finishTime, taskToAssign);
+        for (int parent : taskGraph.tasks[taskToAssign].parents) {
+            const auto [parentCore, parentFinish] = assignmentOf[parent];
+            if (core != parentCore) {
+                const int duration = taskGraph.tasks[parent].volumeOfTargetTo(taskToAssign);
+                processors[parentCore].transferTimeline.emplace_back(parentFinish, duration, parent, taskToAssign);
+            }
+        }
 
         // Move to doneTasks
         auto it = std::find(readyTasks.begin(), readyTasks.end(), taskToAssign);
@@ -385,6 +395,9 @@ int main() {
         std::cout << "==== Core " << coreId++ << '\n';
         for (const auto& [start, finish, taskId] : processor.processingTimeline) {
             std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+        }
+        for (const auto& [start, duration, src, dst] : processor.transferTimeline) {
+            std::cout << "From " << src << " to " << dst << " : " << start << "--" << start+duration << '\n';
         }
     }
 
