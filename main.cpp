@@ -13,16 +13,31 @@ struct TransferEvent {
 };
 
 struct ProcessingEvent {
-    int start, duration, taskId;
-    inline ProcessingEvent(int start, int duration, int taskId) noexcept
-        : start(start), duration(duration), taskId(taskId) {}
-    int finish() const noexcept { return start + duration; }
+    int start, finish, taskId;
+    inline ProcessingEvent(int start, int finish, int taskId) noexcept
+        : start(start), finish(finish), taskId(taskId) {}
+    // int duration() const noexcept { return start + duration; }
 };
 
 
 struct Processor {
     std::vector<ProcessingEvent> processingTimeline;
     std::vector<TransferEvent> transferTimeline;
+
+    int availableAt(int duration, int let) const noexcept {
+        bool conflict = true;
+        while (conflict) {
+            conflict = false;
+            for (const auto& [start, finish, _] : processingTimeline) {
+                if (finish <= let || let + duration <= start) continue;
+                conflict = true;
+                let = finish;
+                break;
+            }
+        }
+
+        return let;
+    }
 };
 // ============================================================================
 // ============================================================================
@@ -41,11 +56,13 @@ struct Task {
     std::vector<int> weights;
     std::vector<int> energies;
     std::vector<TransferTo> targets;
+    std::vector<int> parents;
 
     int policy = 0;
     std::optional<int> early = std::nullopt;
     std::optional<int> late = std::nullopt;
 
+    int delta() const noexcept { return *late - *early; }
     int weight() const noexcept { return weights[policy]; }
     void clearStats() noexcept { early = std::nullopt; late = std::nullopt; }
 
@@ -65,6 +82,7 @@ struct TaskGraph {
     void addTransfer(int src, int dst, int volume) noexcept {
         transfers.emplace_back(src, dst, volume);
         tasks[src].targets.emplace_back(dst, volume);
+        tasks[dst].parents.emplace_back(src);
     }
 };
 
@@ -199,17 +217,30 @@ std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const st
         }
     }
 
+    // int i = 0;
+    // for (const auto& task : taskGraph.tasks) {
+    //     std::cout << i << ": E=" << *task.early << " L=" << *task.late << '\n';
+    //     i++;
+    // }
+
     std::vector<int> criticalPath;
     int currId = criticalPathRoot;
     while (!taskGraph.tasks[currId].targets.empty()) {
+        // std::cout << "For id " << currId << '\n';
         const auto& curr = taskGraph.tasks[currId];
         criticalPath.push_back(currId);
         const int expectedTargetLate = *curr.late + curr.weight();
+        // std::cout << "Looking for " << expectedTargetLate << '\n';
+        bool found = false; // TODO: assert remove
         for (const auto& [id, _] : curr.targets) {
+            // std::cout << "Have " << *taskGraph.tasks[id].late << '\n';
             if (*taskGraph.tasks[id].late == expectedTargetLate) {
                 currId = id;
+                found = true;
                 break;
             }
+        }
+        if (!found) {
             std::cout << "::> Logic error in recalculateStats().\n";
             exit(-1);
         }
@@ -221,8 +252,87 @@ std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const st
 // ============================================================================
 // ============================================================================
 // ============================================================================
+std::vector<Processor> planning(const TaskGraph& taskGraph, const std::vector<int>& rootTasks, int CORES_COUNT) {
+    std::vector<int> readyTasks = rootTasks;
+    std::vector<int> doneTasks;
+    std::vector<Processor> processors(CORES_COUNT);
+    // <core, finish time>
+    std::vector<std::pair<unsigned int, int>> assignmentOf(taskGraph.tasks.size(), std::make_pair(-1, -1));
+
+    // We've found the most urgent Task among the ready ones
+    const auto determineAssignmentCore = [&processors, &taskGraph, &assignmentOf](int taskId){
+        int bestTime = -1;
+        int bestCore;
+        for (unsigned int core = 0; core < processors.size(); core++) {
+            int dataReadyAt = 0;
+            for (int parent : taskGraph.tasks[taskId].parents) {
+                if (assignmentOf[parent].first == core) continue;
+                const int parentFinishedAt = assignmentOf[parent].second;
+                const auto& parentTargets = taskGraph.tasks[parent].targets;
+                int transferTime;
+                for (const auto& [dst, volume] : parentTargets) {
+                    if (dst == taskId) { transferTime = volume; break; }
+                }
+                const int newDataReadyAt = parentFinishedAt + transferTime;
+                if (newDataReadyAt > dataReadyAt) dataReadyAt = newDataReadyAt;
+            }
+
+            const int weight = taskGraph.tasks[taskId].weight();
+            const int canStartAt = processors[core].availableAt(weight, dataReadyAt);
+
+            if (bestTime == -1 || canStartAt < bestTime) {
+                bestTime = canStartAt;
+                bestCore = core;
+            }
+        }
+        return std::make_pair(bestCore, bestTime);
+    };
+
+    while (!readyTasks.empty()) {
+        // Find most urgent Task (min delta = Late - Early)
+        int taskToAssign;
+        int min = 0;
+        for (int i : readyTasks) {
+            if (taskGraph.tasks[i].delta() < min) {
+                min = taskGraph.tasks[i].delta();
+                taskToAssign = i;
+            }
+        }
+
+        std::cout << "Shall assign " << taskToAssign << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
+
+        // Assign
+        const auto [core, startTime] = determineAssignmentCore(taskToAssign);
+        const int finishTime = startTime + taskGraph.tasks[taskToAssign].weight();
+        assignmentOf[taskToAssign] = std::make_pair(core, finishTime);
+        processors[core].processingTimeline.emplace_back(startTime, finishTime, taskToAssign);
+
+        // Move to doneTasks
+        auto it = std::find(readyTasks.begin(), readyTasks.end(), taskToAssign);
+        readyTasks.erase(it);
+        doneTasks.push_back(taskToAssign);
+
+        // Find new ready Tasks
+        for (const auto& [id, _] : taskGraph.tasks[taskToAssign].targets) {
+            bool ready = true;
+            for (int parent : taskGraph.tasks[id].parents) {
+                if (std::find(doneTasks.begin(), doneTasks.end(), parent) == doneTasks.end()) {
+                    ready = false;
+                    break;
+                }
+            }
+
+            if (ready) readyTasks.push_back(id);
+        }
+    }
+
+    return processors;
+}
+// ============================================================================
+// ============================================================================
+// ============================================================================
 int main() {
-    const int DESIRED_TIME = 11;
+    const int DESIRED_TIME = 12;
 
     const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
     if (!taskGraphOpt) return -1;
@@ -239,26 +349,44 @@ int main() {
     }
 
     std::cout << "===============================================" << '\n';
-    const auto PROCESSORS_COUNT = 3;
-    std::vector<Processor> processors(PROCESSORS_COUNT);
 
-    // Start by specifying the slowest(last) policy for each Task.
+    // Start by setting the slowest(last) policy for each Task.
     const auto POLICIES_COUNT = taskGraph.tasks.front().weights.size();
     for (auto& task : taskGraph.tasks) task.policy = POLICIES_COUNT - 1;
 
     auto [criticalPath, criticalTime] = recalculateStats(taskGraph, rootTaskIndices);
+
+    std::cout << "Got CT=" << criticalTime << " for ";
+    for (int i : criticalPath) std::cout << i << ",";
+    std::cout << '\n';
+
     while (criticalTime > DESIRED_TIME) {
         const auto taskToSpeedupOpt = findTaskToSpeedup(criticalPath, taskGraph);
         if (!taskToSpeedupOpt) {
             std::cout << ":> The critical path on best performance does not meet the desired time.\n";
             return 0;
         }
+        std::cout << "Incing " << *taskToSpeedupOpt << '\n';
         taskGraph.tasks[*taskToSpeedupOpt].policy--; // improve performance of this Task
         const auto [newCriticalPath, newCriticalTime] = recalculateStats(taskGraph, rootTaskIndices);
         criticalPath = std::move(newCriticalPath);
         criticalTime = newCriticalTime;
+
+        std::cout << "Got CT=" << criticalTime << " for ";
+        for (int i : criticalPath) std::cout << i << ",";
+        std::cout << '\n';
     }
 
+    const auto CORES_COUNT = 3;
+    const auto cores = planning(taskGraph, rootTaskIndices, CORES_COUNT);
+
+    int coreId = 0;
+    for (const auto& processor : cores) {
+        std::cout << "==== Core " << coreId++ << '\n';
+        for (const auto& [start, finish, taskId] : processor.processingTimeline) {
+            std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+        }
+    }
 
     return 0;
 }
