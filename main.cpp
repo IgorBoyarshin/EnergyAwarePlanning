@@ -160,52 +160,6 @@ std::vector<int> getRootTasks(const TaskGraph& taskGraph) {
     return rootTaskIndices;
 }
 
-// void calculateWeightFrom(int srcIndex, int selfIndex, int cumulativeWeight,
-//         std::vector<std::pair<int, int>>& weightFor, const TaskGraph& taskGraph) {
-//     const auto& selfTask = taskGraph.tasks[selfIndex];
-//     const int selfWeight = selfTask.weights[selfTask.policy];
-//     const int newWeight = cumulativeWeight + selfWeight;
-//     bool mustContinue = weightFor[selfIndex].first == -1; // not initialized
-//     if (weightFor[selfIndex].first < newWeight) {
-//         weightFor[selfIndex].first = newWeight;
-//         weightFor[selfIndex].second = srcIndex;
-//         mustContinue = true; // to recalculate from here on
-//     }
-//     if (!mustContinue) return;
-//     const int resultingWeight = weightFor[selfIndex].first;
-//     for (const auto& [dstIndex, _] : selfTask.targets) {
-//         calculateWeightFrom(selfIndex, dstIndex, resultingWeight, weightFor, taskGraph);
-//     }
-// }
-
-
-// std::pair<std::vector<int>, int> findReversedCriticalPath(const TaskGraph& taskGraph,
-//         const std::vector<int>& rootTasks) noexcept {
-//     // <cumulative sum, from where>
-//     std::vector<std::pair<int, int>> weightFor(taskGraph.tasks.size(), std::make_pair(-1, -1));
-//     for (int i : rootTasks) calculateWeightFrom(-1, i, 0, weightFor, taskGraph);
-//
-//     // Find max cumulative weight
-//     int maxIndex = -1;
-//     int max = -1;
-//     for (unsigned int i = 0; i < weightFor.size(); i++) {
-//         const auto& [w, _] = weightFor[i];
-//         if (w > max) {
-//             max = w;
-//             maxIndex = i;
-//         }
-//     }
-//
-//     std::vector<int> criticalPath;
-//     int curr = maxIndex;
-//     while (curr != -1) {
-//         criticalPath.push_back(curr);
-//         curr = weightFor[curr].second;
-//     }
-//
-//     return std::make_pair(std::move(criticalPath), weightFor[maxIndex].first);
-// }
-
 std::optional<int> findTaskToSpeedup(const std::vector<int>& path, const TaskGraph& taskGraph) {
     // Find the first Task with 'INCable' policy
     for (int id : path) {
