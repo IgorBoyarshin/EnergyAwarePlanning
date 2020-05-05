@@ -70,8 +70,10 @@ struct Task {
     std::optional<int> early = std::nullopt;
     std::optional<int> late = std::nullopt;
 
+    bool canImprove() const noexcept { return policy > 0; }
     int delta() const noexcept { return *late - *early; }
     int weight() const noexcept { return weights[policy]; }
+    int energy() const noexcept { return energies[policy]; }
     void clearStats() noexcept { early = std::nullopt; late = std::nullopt; }
     int volumeOfTargetTo(int id) const noexcept {
         for (const auto& [dst, volume] : targets) {
@@ -231,11 +233,11 @@ std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const st
         }
     }
 
-    // int i = 0;
-    // for (const auto& task : taskGraph.tasks) {
-    //     std::cout << i << ": E=" << *task.early << " L=" << *task.late << '\n';
-    //     i++;
-    // }
+    int i = 0;
+    for (const auto& task : taskGraph.tasks) {
+        std::cout << i << ": E=" << *task.early << " L=" << *task.late << '\n';
+        i++;
+    }
 
     std::vector<int> criticalPath;
     int currId = criticalPathRoot;
@@ -266,7 +268,16 @@ std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const st
 // ============================================================================
 // ============================================================================
 // ============================================================================
-std::vector<Processor> planning(const TaskGraph& taskGraph, const std::vector<int>& rootTasks, int CORES_COUNT) {
+struct PlanningStuff {
+    std::vector<Processor> processors;
+    // <core, finish time>
+    std::vector<std::pair<unsigned int, int>> assignmentOf;
+
+    PlanningStuff(std::vector<Processor>&& processors, std::vector<std::pair<unsigned int, int>>&& assignmentOf)
+        : processors(std::move(processors)), assignmentOf(std::move(assignmentOf)) {}
+};
+
+PlanningStuff planning(const TaskGraph& taskGraph, const std::vector<int>& rootTasks, int CORES_COUNT) {
     std::vector<int> readyTasks = rootTasks;
     std::vector<int> doneTasks;
     std::vector<Processor> processors(CORES_COUNT);
@@ -344,7 +355,32 @@ std::vector<Processor> planning(const TaskGraph& taskGraph, const std::vector<in
         }
     }
 
-    return processors;
+    return { std::move(processors), std::move(assignmentOf) };
+}
+
+std::vector<int> findEarliestToImproveFrom(int taskId, const TaskGraph& taskGraph,
+        const std::vector<std::pair<unsigned int, int>>& assignmentOf) { // <core, finish time>
+    const auto& task = taskGraph.tasks[taskId];
+    const auto [selfCore, selfFinish] = assignmentOf[taskId];
+    const int selfStart = selfFinish - task.weight();
+
+    std::vector<int> idsToSpeedup;
+    for (int parent : task.parents) {
+        const auto [parentCore, parentFinish] = assignmentOf[parent];
+        const int transferTime = (selfCore == parentCore) ? 0 : taskGraph.tasks[parent].volumeOfTargetTo(taskId);
+        const int couldStartAt = parentFinish + transferTime;
+        if (couldStartAt == selfStart) { // parent potentially held us up
+            std::cout << "Task " << parent << "(parent of " << taskId << ") maybe held us up.\n";
+            const auto parentSuggestion = findEarliestToImproveFrom(parent, taskGraph, assignmentOf);
+            idsToSpeedup.insert(idsToSpeedup.end(), parentSuggestion.begin(), parentSuggestion.end());
+        }
+    }
+    if (idsToSpeedup.empty()) {
+        // TODO: remove
+        std::cout << "Parents of " << taskId << " had no suggestions.\n";
+    }
+    if (idsToSpeedup.empty() && task.canImprove()) idsToSpeedup.push_back(taskId);
+    return idsToSpeedup;
 }
 // ============================================================================
 // ============================================================================
@@ -395,25 +431,71 @@ int main() {
         std::cout << '\n';
     }
 
-    const auto CORES_COUNT = 3;
-    const auto cores = planning(taskGraph, rootTaskIndices, CORES_COUNT);
-    int totalTime = 0;
-    for (const auto& processor : cores) {
-        const int finish = core.finishedAt();
-        if (finish > totalTime) totalTime = finish;
-    }
-    std::cout << "Total time = " << totalTime << '\n';
 
-    int coreId = 0;
-    for (const auto& processor : cores) {
-        std::cout << "==== Core " << coreId++ << '\n';
-        for (const auto& [start, finish, taskId] : processor.processingTimeline) {
-            std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+    while (true) {
+        const auto CORES_COUNT = 3;
+        const auto [cores, assignmentOf] = planning(taskGraph, rootTaskIndices, CORES_COUNT);
+
+        // Display planning
+        int coreId = 0;
+        for (const auto& processor : cores) {
+            std::cout << "==== Core " << coreId++ << '\n';
+            for (const auto& [start, finish, taskId] : processor.processingTimeline) {
+                std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+            }
+            for (const auto& [start, duration, src, dst] : processor.transferTimeline) {
+                std::cout << "From " << src << " to " << dst << " : " << start << "--" << start+duration << '\n';
+            }
         }
-        for (const auto& [start, duration, src, dst] : processor.transferTimeline) {
-            std::cout << "From " << src << " to " << dst << " : " << start << "--" << start+duration << '\n';
+
+        int totalTime = 0;
+        for (const auto& processor : cores) {
+            const int finish = processor.finishedAt();
+            if (finish > totalTime) totalTime = finish;
         }
+        std::cout << "Total time = " << totalTime << '\n';
+        if (totalTime <= DESIRED_TIME) {
+            std::cout << "The planning is sufficient.\n";
+            break;
+        }
+
+        // Find earliest of late finish time
+        int earliestTime = -1;
+        unsigned int earliestId;
+        for (unsigned int taskId = 0; taskId < taskGraph.tasks.size(); taskId++) {
+            const auto& task = taskGraph.tasks[taskId];
+            const auto startTime = assignmentOf[taskId].second - task.weight();
+            const int late = DESIRED_TIME + *task.late;
+            if (startTime > late) { // started late
+                if (earliestTime == -1 || earliestTime > startTime) {
+                    earliestTime = startTime;
+                    earliestId = taskId;
+                }
+            }
+        }
+        std::cout << "Earliest of late task is " << earliestId << ": ";
+        std::cout << "It should have started by "
+            << (DESIRED_TIME + *taskGraph.tasks[earliestId].late)
+            << " but started at " << earliestTime << ". Shall improve" << '\n';
+
+        const auto suggestedImprovements = findEarliestToImproveFrom(earliestId, taskGraph, assignmentOf);
+        if (suggestedImprovements.empty()) {
+            std::cout << "There is nothing to be done..." << '\n';
+            break;
+        }
+
+        std::cout << "Suggestions:" << '\n';
+        for (int s : suggestedImprovements) std::cout << s << ",";
+        std::cout << '\n';
+        std::cout << "Applying suggestions:\n";
+        for (int s : suggestedImprovements) {
+            std::cout << "Incing " << s << '\n';
+            taskGraph.tasks[s].policy--; // improve performance of this Task
+        }
+        recalculateStats(taskGraph, rootTaskIndices);
     }
+
+
 
     return 0;
 }
