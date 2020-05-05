@@ -444,14 +444,14 @@ struct DrawingBasics {
 
 
 struct DrawingElement {
-	SDL_Rect rectangle;
-	SDL_Surface*  surface;
-	SDL_Texture* texture;
-	SDL_Color color;
+    SDL_Rect rectangle;
+    SDL_Surface*  surface;
+    SDL_Texture* texture;
+    SDL_Color color;
 
-	DrawingElement(const SDL_Rect& rectangle, SDL_Surface*  surface,
-			SDL_Texture* texture, const SDL_Color& color) :
-		rectangle(rectangle), surface(surface), texture(texture), color(color) {}
+    DrawingElement(const SDL_Rect& rectangle, SDL_Surface*  surface,
+            SDL_Texture* texture, const SDL_Color& color) :
+        rectangle(rectangle), surface(surface), texture(texture), color(color) {}
 };
 
 
@@ -489,8 +489,8 @@ bool init() {
     }
 
     if (TTF_Init() == -1) {
-    	std::cout << "SDL_ttf could not initialize! SDL Error: " << TTF_GetError() << std::endl;
-    	return false;
+        std::cout << "SDL_ttf could not initialize! SDL Error: " << TTF_GetError() << std::endl;
+        return false;
     }
 
     // Set texture filtering to linear
@@ -579,11 +579,10 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     }
 
     // TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 200);
-    // TTF_Font* font = TTF_OpenFont("/usr/share/fonts/SourceCodeProNerd/Sauce Code Pro Light Nerd Font Complete.ttf", 200);
-    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 200);
+    TTF_Font* font = TTF_OpenFont("DejaVuSans-Bold.ttf", 200);
     if (font == nullptr) {
-    	std::cout << "Unable to open font" << std::endl;
-    	return;
+        std::cout << "Unable to open font" << std::endl;
+        return;
     }
 
     // Prepare stuff to draw
@@ -621,12 +620,12 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
         const SDL_Rect rect{x, y, width, height};
 
         SDL_Surface*  surface = TTF_RenderText_Solid(font, subtask.name.c_str(), subtask_color);
-		SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
         drawing_elements.emplace_back(std::move(rect), surface, texture, subtask_color);
 
         const auto& curr_transmissions = subtask.transmissions;
         for (unsigned int index = 0; index < curr_transmissions.size(); index++) {
-        	const auto& curr_trans = curr_transmissions[index];
+            const auto& curr_trans = curr_transmissions[index];
             const int x = calculate_begin(curr_trans);
             const int y = (elems_before + 2 + index) * y_unit; // + 2 = 1 * 2 for the Subtask itself (weight == 2)
             const int width = calculate_width(curr_trans);
@@ -635,8 +634,8 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 
             const std::string to_proc = std::string{"To "} + std::to_string(curr_trans.proc_dest) + " : " + subtask.name;
             SDL_Surface*  surface = TTF_RenderText_Solid(font, to_proc.c_str(), transmission_color);
-			SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
-        	drawing_elements.emplace_back(std::move(rect), surface, texture, transmission_color);
+            SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
+            drawing_elements.emplace_back(std::move(rect), surface, texture, transmission_color);
         }
         core_separators.push_back((elems_before + 2 + curr_transmissions.size()) * y_unit);
     }
@@ -659,34 +658,34 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 
         // Draw a grid
         SDL_SetRenderDrawColor(gRenderer, 0xC0, 0xC0, 0xC0, 0xFF);
-		for (unsigned int i = 0; i < SCREEN_HEIGHT; i += y_unit) {
-			SDL_RenderDrawLine(gRenderer, 0, i, SCREEN_WIDTH, i);
-		}
-		for (unsigned int i = 0; i < SCREEN_WIDTH; i += x_unit) {
-			SDL_RenderDrawLine(gRenderer, i, 0, i, SCREEN_HEIGHT);
-		}
-		SDL_SetRenderDrawColor(gRenderer, 0x00, 0x00, 0xF0, 0xFF);
-		for (unsigned int separator : core_separators) {
-			for (int line = -2; line <= 2; line++) {
-				SDL_RenderDrawLine(gRenderer, 0, separator + line, SCREEN_WIDTH, separator + line);
-			}
-		}
+        for (unsigned int i = 0; i < SCREEN_HEIGHT; i += y_unit) {
+            SDL_RenderDrawLine(gRenderer, 0, i, SCREEN_WIDTH, i);
+        }
+        for (unsigned int i = 0; i < SCREEN_WIDTH; i += x_unit) {
+            SDL_RenderDrawLine(gRenderer, i, 0, i, SCREEN_HEIGHT);
+        }
+        SDL_SetRenderDrawColor(gRenderer, 0x00, 0x00, 0xF0, 0xFF);
+        for (unsigned int separator : core_separators) {
+            for (int line = -2; line <= 2; line++) {
+                SDL_RenderDrawLine(gRenderer, 0, separator + line, SCREEN_WIDTH, separator + line);
+            }
+        }
 
         if (!drawing_elements.empty()) {
-        	for (const DrawingElement element : drawing_elements) {
-        		SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
-            	SDL_RenderDrawRect(gRenderer, &element.rectangle);
-            	SDL_RenderCopy(gRenderer, element.texture, nullptr, &element.rectangle);
-        	}
+            for (const DrawingElement element : drawing_elements) {
+                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
+                SDL_RenderDrawRect(gRenderer, &element.rectangle);
+                SDL_RenderCopy(gRenderer, element.texture, nullptr, &element.rectangle);
+            }
         }
         // Update screen
         SDL_RenderPresent(gRenderer);
     }
 
     for (const DrawingElement element : drawing_elements) {
-		SDL_DestroyTexture(element.texture);
-    	SDL_FreeSurface(element.surface);
-	}
+        SDL_DestroyTexture(element.texture);
+        SDL_FreeSurface(element.surface);
+    }
     TTF_CloseFont(font);
     TTF_Quit();
 
