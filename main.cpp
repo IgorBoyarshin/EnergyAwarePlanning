@@ -571,7 +571,7 @@ DrawingBasics getDrawingBasics(const std::vector<Subtask>& subtasks) {
 void drawGraph(const std::vector<Subtask>& subtasks) {
     const auto& [units, trans_count] = getDrawingBasics(subtasks);
     const auto& [x_unit, y_unit] = units;
-    std::cout << "(x_unit = " << x_unit << ", y_unit = " << y_unit << ")" << std::endl;
+    // std::cout << "(x_unit = " << x_unit << ", y_unit = " << y_unit << ")" << std::endl;
 
     if (!init()) {
         std::cout << "Failed to initialize!" << std::endl;
@@ -632,7 +632,7 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
             const int height = y_unit;
             const SDL_Rect rect{x, y, width, height};
 
-            const std::string to_proc = std::string{"To "} + std::to_string(curr_trans.proc_dest) + " : " + subtask.name;
+            const std::string to_proc = subtask.name + "->" + std::to_string(curr_trans.proc_dest);
             SDL_Surface*  surface = TTF_RenderText_Solid(font, to_proc.c_str(), transmission_color);
             SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
             drawing_elements.emplace_back(std::move(rect), surface, texture, transmission_color);
@@ -647,7 +647,8 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     while (!quit) {
         //Handle events on queue
         while (SDL_PollEvent(&e) != 0) {
-            if ((e.type == SDL_QUIT) || (e.key.keysym.sym == SDLK_q)) {
+            // if ((e.type == SDL_QUIT) || (e.key.keysym.sym == SDLK_q)) {
+            if (e.type == SDL_QUIT) {
                 quit = true;
             }
         }
@@ -814,8 +815,9 @@ int main() {
             std::vector<Transmission> transmissions;
             for (const auto& [start, duration, src, dst] : transferTimeline) {
                 if (src == taskId) {
-                    const int destCore = planningStuff.assignmentOf[dst].first;
-                    transmissions.emplace_back(start, start + duration, destCore);
+                    // const int destCore = planningStuff.assignmentOf[dst].first;
+                    // transmissions.emplace_back(start, start + duration, destCore);
+                    transmissions.emplace_back(start, start + duration, dst);
                 }
             }
             subtasks.emplace_back(processorIndex, std::to_string(taskId), start, finish, std::move(transmissions));
