@@ -590,6 +590,7 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     const SDL_Color transmission_color = {0, 255, 0, 0};
     std::vector<DrawingElement> drawing_elements;
     std::vector<unsigned int> core_separators;
+    std::vector<SDL_Rect> rectangles;
 
     for (const auto& subtask : subtasks) {
         // TODO: add margin
@@ -623,6 +624,12 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
         SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
         drawing_elements.emplace_back(std::move(rect), surface, texture, subtask_color);
 
+        // Rectangles for bolder line
+        for (int line = -2; line <= 2; line++) {
+            const SDL_Rect rect{x + line, y, width, height};
+            rectangles.emplace_back(std::move(rect));
+        }
+
         const auto& curr_transmissions = subtask.transmissions;
         for (unsigned int index = 0; index < curr_transmissions.size(); index++) {
             const auto& curr_trans = curr_transmissions[index];
@@ -632,12 +639,18 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
             const int height = y_unit;
             const SDL_Rect rect{x, y, width, height};
 
-            const std::string to_proc = subtask.name + "->" + std::to_string(curr_trans.proc_dest);
+            const std::string to_proc = subtask.name + ">" + std::to_string(curr_trans.proc_dest);
             SDL_Surface*  surface = TTF_RenderText_Solid(font, to_proc.c_str(), transmission_color);
             SDL_Texture* texture = SDL_CreateTextureFromSurface(gRenderer, surface);
             drawing_elements.emplace_back(std::move(rect), surface, texture, transmission_color);
         }
-        core_separators.push_back((elems_before + 2 + curr_transmissions.size()) * y_unit);
+    }
+
+    // Lines for bold core separator
+    unsigned int curr_elem_count = 0;
+    for (unsigned int core = 0; core < trans_count.size(); core++) {
+        curr_elem_count += trans_count[core] + 2;
+        core_separators.push_back(curr_elem_count * y_unit); // + 2 = 1 * 2 for the Subtask itself (weight == 2)
     }
 
     // Draw stuff
@@ -665,6 +678,21 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
         for (unsigned int i = 0; i < SCREEN_WIDTH; i += x_unit) {
             SDL_RenderDrawLine(gRenderer, i, 0, i, SCREEN_HEIGHT);
         }
+
+        if (!drawing_elements.empty()) {
+            for (const DrawingElement element : drawing_elements) {
+                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xF2, 0xB3, 0xFF);        
+                SDL_RenderFillRect(gRenderer, &element.rectangle);
+                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
+                SDL_RenderDrawRect(gRenderer, &element.rectangle);
+                SDL_RenderCopy(gRenderer, element.texture, nullptr, &element.rectangle);
+            }
+        }
+
+        for(SDL_Rect rectangle : rectangles) {
+            SDL_RenderDrawRect(gRenderer, &rectangle);
+        }
+
         SDL_SetRenderDrawColor(gRenderer, 0x00, 0x00, 0xF0, 0xFF);
         for (unsigned int separator : core_separators) {
             for (int line = -2; line <= 2; line++) {
@@ -672,13 +700,6 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
             }
         }
 
-        if (!drawing_elements.empty()) {
-            for (const DrawingElement element : drawing_elements) {
-                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
-                SDL_RenderDrawRect(gRenderer, &element.rectangle);
-                SDL_RenderCopy(gRenderer, element.texture, nullptr, &element.rectangle);
-            }
-        }
         // Update screen
         SDL_RenderPresent(gRenderer);
     }
