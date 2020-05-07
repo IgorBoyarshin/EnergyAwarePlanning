@@ -329,8 +329,8 @@ PlanningStuff planning(const TaskGraph& taskGraph, const std::vector<int>& rootT
             }
         }
 
-        std::cout << "Shall assign " << taskToAssign
-            << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
+        // std::cout << "Shall assign " << taskToAssign
+        //     << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
 
         // Assign
         const auto [core, startTime] = determineAssignmentCore(taskToAssign);
@@ -705,7 +705,6 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
         for (const DrawingElement tick : drawing_ticks) {
             SDL_SetRenderDrawColor(renderer, 0xC0, 0xC0, 0xC0, 0xFF);
             SDL_RenderCopy(renderer, tick.texture, nullptr, &tick.rectangle);
-        }
     }
 
     // Draw core number
@@ -752,6 +751,17 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     TTF_Quit();
 
     close(window, renderer);
+}
+
+void printResult(const TaskGraph& taskGraph) {
+    int id = 0;
+    for (const auto& task : taskGraph.tasks) {
+        std::cout << "Task {" << id++ << "} is on V(" << task.policy << ")" << '\n';
+    }
+
+    int totalEnergy = 0;
+    for (const auto& task : taskGraph.tasks) totalEnergy += task.energy();
+    std::cout << "Total energy consumption = " << totalEnergy << '\n';
 }
 // ============================================================================
 // ============================================================================
@@ -811,15 +821,18 @@ int main() {
 
         // Display planning
         int coreId = 0;
+        std::cout << "============= Planning Begin =============\n";
         for (const auto& processor : cores) {
             std::cout << "==== Core " << coreId++ << '\n';
             for (const auto& [start, finish, taskId] : processor.processingTimeline) {
-                std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+                std::cout << "{" << taskId << "}: [" << start << ',' << finish << ')' << '\n';
             }
             for (const auto& [start, duration, src, dst] : processor.transferTimeline) {
-                std::cout << "From " << src << " to " << dst << " : " << start << "--" << start+duration << '\n';
+                std::cout << "From {" << src << "} to {" << dst
+                    << "} : [" << start << ','<< start+duration << ')' << '\n';
             }
         }
+        std::cout << "============= Planning End =============\n";
 
         int totalTime = 0;
         for (const auto& processor : cores) {
@@ -829,9 +842,13 @@ int main() {
         std::cout << "Total time = " << totalTime << '\n';
         if (totalTime <= DESIRED_TIME) {
             std::cout << "The planning is sufficient.\n";
+            printResult(taskGraph);
             break;
+        } else {
+            std::cout << "We didn't meet the desired time.\n";
         }
 
+        // Else try to improve
         // Find earliest of late finish time
         int earliestTime = -1;
         unsigned int earliestId;
@@ -868,7 +885,7 @@ int main() {
         recalculateStats(taskGraph, rootTaskIndices);
     }
 
-    // Prep staff for drawing
+    // Prep stuff for drawing
     std::vector<Subtask> subtasks;
     int processorIndex = 0;
     for (const auto& [processingTimeline, transferTimeline] : planningStuff.processors) {
