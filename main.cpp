@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <string_view>
+#include <random>
 
 // For drawing
 #include <string>
@@ -107,6 +108,11 @@ struct TaskGraph {
         transfers.emplace_back(src, dst, volume);
         tasks[src].targets.emplace_back(dst, volume);
         tasks[dst].parents.emplace_back(src);
+    }
+    void removeLastTransfer(int src, int dst) noexcept {
+        transfers.erase(transfers.end());
+        tasks[src].targets.erase(tasks[src].targets.end());
+        tasks[dst].parents.erase(tasks[dst].parents.end());
     }
 };
 
@@ -713,6 +719,79 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 
     close();
 }
+// ============================================================================
+// ============================================================================
+// ============================================================================
+// [signed, unsigned]: short, int, long, long long
+// [low, high]
+template<typename T = int>
+T getRandomUniformInt(T low, T high) {
+    static std::random_device rd;
+    /* static std::seed_seq seed{1, 2, 3, 300}; */
+    /* static std::mt19937 e2(seed); */
+    static std::mt19937 e2(rd());
+    std::uniform_int_distribution<T> dist(low, high);
+
+    return dist(e2);
+}
+
+TaskGraph generateRandomTaskGraph(int N, int policies, float connectivity,
+        int lowTime, int highTime, int lowVolume, int highVolume) noexcept {
+    const int MAX_ENERGY_SLOWEST = 40;
+    const float SPEEDUP_ENERGY_MAGNIFIER = 1.1f;
+    const float SPEEDUP_WEIGHT_MAGNIFIER = 0.7f;
+    const auto energyOf = [policies, highTime,
+          MAX_ENERGY_SLOWEST, SPEEDUP_ENERGY_MAGNIFIER](int time, int policy){
+        float energy = static_cast<float>(time) / static_cast<float>(highTime) * MAX_ENERGY_SLOWEST;
+        for (int i = 0; i < policies - policy - 1; i++) energy *= SPEEDUP_ENERGY_MAGNIFIER;
+        return static_cast<int>(energy);
+    };
+
+    TaskGraph taskGraph(true);
+    for (int n = 0; n < N; n++) {
+        std::vector<int> weights(policies, 0);
+        std::vector<int> energies(policies, 0);
+        for (int policy = 0; policy < policies; policy++) {
+            float timeF = getRandomUniformInt(lowTime, highTime);
+            for (int j = 0; j < policies - policy - 1; j++) timeF *= SPEEDUP_WEIGHT_MAGNIFIER;
+            if (timeF <= 1.0f) timeF = 1.01f;
+            const int time = static_cast<int>(timeF);
+            const int energy = energyOf(time, policy);
+            weights[policy] = time;
+            energies[policy] = energy;
+        }
+        taskGraph.add(std::move(weights), std::move(energies));
+    }
+
+    const int LINKS_COUNT = static_cast<int>(connectivity * N * (N - 1) / 2);
+    std::vector<std::pair<int, int>> links;
+    const auto existsLinkBetween = [&links](int a, int b){
+        for (const auto& [t1, t2] : links) {
+            if ((t1 == a && t2 == b) || (t1 == b && t2 == a)) return true;
+        }
+        return false;
+    };
+
+    int link = 0;
+    while (link < LINKS_COUNT) {
+        int a, b;
+        do {
+            a = getRandomUniformInt(0, N - 1);
+            b = getRandomUniformInt(0, N - 1);
+        } while (existsLinkBetween(a, b));
+
+        const int volume = getRandomUniformInt(lowVolume, highVolume);
+        taskGraph.addTransfer(a, b, volume);
+        if (cyclesExist(taskGraph, getRootTasks(taskGraph))) {
+            taskGraph.removeLastTransfer(a, b);
+            continue;
+        }
+        link++;
+        links.push_back({ a, b });
+    }
+
+    return taskGraph;
+}
 
 void printResult(const TaskGraph& taskGraph) {
     int id = 0;
@@ -724,15 +803,45 @@ void printResult(const TaskGraph& taskGraph) {
     for (const auto& task : taskGraph.tasks) totalEnergy += task.energy();
     std::cout << "Total energy consumption = " << totalEnergy << '\n';
 }
+
+std::ostream& operator<<(std::ostream& os, const TaskGraph& taskGraph) {
+    os << "------ TASK GRAPH begin ------\n";
+    int id = 0;
+    for (const auto& task : taskGraph.tasks) {
+        os << "Task {" << id++ << "} Weights = ";
+        for (int w : task.weights) os << w << ',';
+        os << " Energies = ";
+        for (int e : task.energies) os << e << ',';
+        os << " Parents = ";
+        for (int p : task.parents) os << '{' << p << '}' << ',';
+        os << " Targets = ";
+        for (const auto& [dst, volume] : task.targets) {
+            os << "{" << dst << "}_" << volume << ", ";
+        }
+        os << '\n';
+    }
+    os << "------ TASK GRAPH end ------\n";
+    return os;
+}
 // ============================================================================
 // ============================================================================
 // ============================================================================
 int main() {
     const int DESIRED_TIME = 12;
 
-    const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
-    if (!taskGraphOpt) return -1;
-    TaskGraph taskGraph = *taskGraphOpt;
+    // const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
+    // if (!taskGraphOpt) return -1;
+    // TaskGraph taskGraph = *taskGraphOpt;
+    const int N = 7;
+    const int POLICIES = 2;
+    const float connectivity = 0.3f;
+    const int lowTime = 3, highTime = 7;
+    const int lowVolume = 1, highVolume = 2;
+    TaskGraph taskGraph = generateRandomTaskGraph(N, POLICIES, connectivity,
+            lowTime, highTime, lowVolume, highVolume);
+    std::cout << taskGraph << '\n';
+
+    /*
     const std::vector<int> rootTaskIndices = getRootTasks(taskGraph);
 
     if (cyclesExist(taskGraph, rootTaskIndices)) {
@@ -865,6 +974,7 @@ int main() {
     }
 
     drawGraph(subtasks);
+    */
 
     return 0;
 }
