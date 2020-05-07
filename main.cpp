@@ -698,7 +698,7 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 
     if (!drawing_elements.empty()) {
         for (const DrawingElement element : drawing_elements) {
-            SDL_SetRenderDrawColor(renderer, 0xFF, 0xF2, 0xB3, 0xFF);        
+            SDL_SetRenderDrawColor(renderer, 0xFF, 0xF2, 0xB3, 0xFF);
             SDL_RenderFillRect(renderer, &element.rectangle);
             SDL_SetRenderDrawColor(renderer, 0xFF, 0x00, 0x00, 0xFF);
             SDL_RenderDrawRect(renderer, &element.rectangle);
@@ -711,6 +711,7 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
         for (const DrawingElement tick : drawing_ticks) {
             SDL_SetRenderDrawColor(renderer, 0xC0, 0xC0, 0xC0, 0xFF);
             SDL_RenderCopy(renderer, tick.texture, nullptr, &tick.rectangle);
+        }
     }
 
     // Draw core number
@@ -868,19 +869,18 @@ std::ostream& operator<<(std::ostream& os, const TaskGraph& taskGraph) {
 int main() {
     const int DESIRED_TIME = 12;
 
-    // const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
-    // if (!taskGraphOpt) return -1;
-    // TaskGraph taskGraph = *taskGraphOpt;
-    const int N = 7;
-    const int POLICIES = 2;
-    const float connectivity = 0.3f;
-    const int lowTime = 3, highTime = 7;
-    const int lowVolume = 1, highVolume = 2;
-    TaskGraph taskGraph = generateRandomTaskGraph(N, POLICIES, connectivity,
-            lowTime, highTime, lowVolume, highVolume);
-    std::cout << taskGraph << '\n';
+    const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
+    if (!taskGraphOpt) return -1;
+    TaskGraph taskGraph = *taskGraphOpt;
+    // const int N = 7;
+    // const int POLICIES = 2;
+    // const float connectivity = 0.3f;
+    // const int lowTime = 3, highTime = 7;
+    // const int lowVolume = 1, highVolume = 2;
+    // TaskGraph taskGraph = generateRandomTaskGraph(N, POLICIES, connectivity,
+    //         lowTime, highTime, lowVolume, highVolume);
+    // std::cout << taskGraph << '\n';
 
-    /*
     const std::vector<int> rootTaskIndices = getRootTasks(taskGraph);
 
     if (cyclesExist(taskGraph, rootTaskIndices)) {
@@ -1013,7 +1013,6 @@ int main() {
     }
 
     drawGraph(subtasks);
-    */
 
     return 0;
 }
