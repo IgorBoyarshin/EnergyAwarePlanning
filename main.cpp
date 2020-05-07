@@ -503,7 +503,7 @@ bool init(SDL_Window** window, SDL_Renderer** renderer, int screen_width, int sc
     }
 
     // Create window
-    *window = SDL_CreateWindow("Little SDL", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, SDL_WINDOW_SHOWN);
+    *window = SDL_CreateWindow("Energy Aware Planning", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, SDL_WINDOW_SHOWN);
     if (*window == nullptr) {
         std::cout << "Window could not be created! SDL Error: " << SDL_GetError() << std::endl;
         return false;
@@ -566,7 +566,7 @@ DrawingBasics getDrawingBasics(const std::vector<Subtask>& subtasks, int screen_
         }
     }
     // Values with margins
-    const int available_width = screen_width - 2 * screen_width / max_x;
+    const int available_width = screen_width - screen_width / max_x;
     const int available_height = screen_height - 2 * screen_height / sum_y;
 
 
