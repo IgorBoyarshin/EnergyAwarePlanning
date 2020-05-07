@@ -681,7 +681,7 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 
         if (!drawing_elements.empty()) {
             for (const DrawingElement element : drawing_elements) {
-                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xF2, 0xB3, 0xFF);        
+                SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xF2, 0xB3, 0xFF);
                 SDL_RenderFillRect(gRenderer, &element.rectangle);
                 SDL_SetRenderDrawColor(gRenderer, 0xFF, 0x00, 0x00, 0xFF);
                 SDL_RenderDrawRect(gRenderer, &element.rectangle);
@@ -712,6 +712,17 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     TTF_Quit();
 
     close();
+}
+
+void printResult(const TaskGraph& taskGraph) {
+    int id = 0;
+    for (const auto& task : taskGraph.tasks) {
+        std::cout << "Task {" << id++ << "} is on V(" << task.policy << ")" << '\n';
+    }
+
+    int totalEnergy = 0;
+    for (const auto& task : taskGraph.tasks) totalEnergy += task.energy();
+    std::cout << "Total energy consumption = " << totalEnergy << '\n';
 }
 // ============================================================================
 // ============================================================================
@@ -792,11 +803,13 @@ int main() {
         std::cout << "Total time = " << totalTime << '\n';
         if (totalTime <= DESIRED_TIME) {
             std::cout << "The planning is sufficient.\n";
+            printResult(taskGraph);
             break;
         } else {
             std::cout << "We didn't meet the desired time.\n";
         }
 
+        // Else try to improve
         // Find earliest of late finish time
         int earliestTime = -1;
         unsigned int earliestId;
@@ -833,7 +846,7 @@ int main() {
         recalculateStats(taskGraph, rootTaskIndices);
     }
 
-    // Prep staff for drawing
+    // Prep stuff for drawing
     std::vector<Subtask> subtasks;
     int processorIndex = 0;
     for (const auto& [processingTimeline, transferTimeline] : planningStuff.processors) {
