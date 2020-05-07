@@ -247,11 +247,11 @@ std::pair<std::vector<int>, int> recalculateStats(TaskGraph& taskGraph, const st
         }
     }
 
-    int i = 0;
-    for (const auto& task : taskGraph.tasks) {
-        std::cout << i << ": E=" << *task.early << " L=" << *task.late << '\n';
-        i++;
-    }
+    // int i = 0;
+    // for (const auto& task : taskGraph.tasks) {
+    //     std::cout << i << ": E=" << *task.early << " L=" << *task.late << '\n';
+    //     i++;
+    // }
 
     std::vector<int> criticalPath;
     int currId = criticalPathRoot;
@@ -387,6 +387,11 @@ std::vector<int> findEarliestToImproveFrom(int taskId, const TaskGraph& taskGrap
         if (couldStartAt == selfStart) { // parent potentially held us up
             std::cout << "Task " << parent << "(parent of " << taskId << ") maybe held us up.\n";
             const auto parentSuggestion = findEarliestToImproveFrom(parent, taskGraph, assignmentOf);
+            if (parentSuggestion.empty() && task.canImprove()) {
+                std::cout << "Task " << taskId << " must improve because parent " << parent
+                    << " held us up and he can't improve.\n";
+                return { taskId };
+            }
             idsToSpeedup.insert(idsToSpeedup.end(), parentSuggestion.begin(), parentSuggestion.end());
         }
     }
@@ -766,19 +771,19 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
 // [low, high]
 template<typename T = int>
 T getRandomUniformInt(T low, T high) {
-    static std::random_device rd;
-    /* static std::seed_seq seed{1, 2, 3, 300}; */
-    /* static std::mt19937 e2(seed); */
-    static std::mt19937 e2(rd());
+    // static std::random_device rd;
+    // static std::mt19937 e2(rd());
+    static std::seed_seq seed{1, 2, 3, 302};
+    static std::mt19937 e2(seed);
     std::uniform_int_distribution<T> dist(low, high);
 
     return dist(e2);
 }
 
-TaskGraph generateRandomTaskGraph(int N, int policies, float connectivity,
+std::pair<TaskGraph, int> generateRandomTaskGraph(int N, int policies, float connectivity,
         int lowTime, int highTime, int lowVolume, int highVolume) noexcept {
     const int MAX_ENERGY_SLOWEST = 40;
-    const float SPEEDUP_ENERGY_MAGNIFIER = 1.1f;
+    const float SPEEDUP_ENERGY_MAGNIFIER = 1.7f;
     const float SPEEDUP_WEIGHT_MAGNIFIER = 0.7f;
     const auto energyOf = [policies, highTime,
           MAX_ENERGY_SLOWEST, SPEEDUP_ENERGY_MAGNIFIER](int time, int policy){
@@ -791,12 +796,12 @@ TaskGraph generateRandomTaskGraph(int N, int policies, float connectivity,
     for (int n = 0; n < N; n++) {
         std::vector<int> weights(policies, 0);
         std::vector<int> energies(policies, 0);
+        const float timeF = getRandomUniformInt(lowTime, highTime);
         for (int policy = 0; policy < policies; policy++) {
-            float timeF = getRandomUniformInt(lowTime, highTime);
-            for (int j = 0; j < policies - policy - 1; j++) timeF *= SPEEDUP_WEIGHT_MAGNIFIER;
-            if (timeF <= 1.0f) timeF = 1.01f;
-            const int time = static_cast<int>(timeF);
-            const int energy = energyOf(time, policy);
+            float time = timeF;
+            for (int j = 0; j < policies - policy - 1; j++) time *= SPEEDUP_WEIGHT_MAGNIFIER;
+            if (time <= 1.0f) time = 1.01f;
+            const int energy = energyOf(timeF, policy);
             weights[policy] = time;
             energies[policy] = energy;
         }
@@ -816,21 +821,29 @@ TaskGraph generateRandomTaskGraph(int N, int policies, float connectivity,
     while (link < LINKS_COUNT) {
         int a, b;
         do {
-            a = getRandomUniformInt(0, N - 1);
-            b = getRandomUniformInt(0, N - 1);
+            a = getRandomUniformInt(0, N - 2);
+            b = getRandomUniformInt(a + 1, N - 1);
         } while (existsLinkBetween(a, b));
 
         const int volume = getRandomUniformInt(lowVolume, highVolume);
         taskGraph.addTransfer(a, b, volume);
-        if (cyclesExist(taskGraph, getRootTasks(taskGraph))) {
-            taskGraph.removeLastTransfer(a, b);
-            continue;
-        }
+        // if (cyclesExist(taskGraph, getRootTasks(taskGraph))) {
+        //     taskGraph.removeLastTransfer(a, b);
+        //     continue;
+        // }
         link++;
         links.push_back({ a, b });
     }
 
-    return taskGraph;
+    const auto rootTaskIndices = getRootTasks(taskGraph);
+    for (auto& task : taskGraph.tasks) task.policy = policies - 1; // slowest
+    const auto [_criticalPathSlowest, criticalTimeSlowest] = recalculateStats(taskGraph, rootTaskIndices);
+    for (auto& task : taskGraph.tasks) task.policy = 0; // fastest
+    const auto [_criticalPathFastest, criticalTimeFastest] = recalculateStats(taskGraph, rootTaskIndices);
+    const int desiredTime = (criticalTimeFastest + criticalTimeSlowest) / 2;
+    // std::cout << criticalTimeSlowest << " " << criticalTimeFastest << '\n';
+
+    return std::make_pair(taskGraph, desiredTime);
 }
 
 void printResult(const TaskGraph& taskGraph) {
@@ -867,19 +880,20 @@ std::ostream& operator<<(std::ostream& os, const TaskGraph& taskGraph) {
 // ============================================================================
 // ============================================================================
 int main() {
-    const int DESIRED_TIME = 12;
+    // const int DESIRED_TIME = 12;
+    // const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
+    // if (!taskGraphOpt) return -1;
+    // TaskGraph taskGraph = *taskGraphOpt;
+    const int N = 7;
+    const int POLICIES = 2;
+    const float connectivity = 0.4f;
+    const int lowTime = 3, highTime = 10;
+    const int lowVolume = 1, highVolume = 3;
+    auto [taskGraph, DESIRED_TIME] = generateRandomTaskGraph(N, POLICIES, connectivity,
+            lowTime, highTime, lowVolume, highVolume);
+    std::cout << taskGraph << '\n';
 
-    const auto taskGraphOpt = readTaskGraph("taskGraph.txt");
-    if (!taskGraphOpt) return -1;
-    TaskGraph taskGraph = *taskGraphOpt;
-    // const int N = 7;
-    // const int POLICIES = 2;
-    // const float connectivity = 0.3f;
-    // const int lowTime = 3, highTime = 7;
-    // const int lowVolume = 1, highVolume = 2;
-    // TaskGraph taskGraph = generateRandomTaskGraph(N, POLICIES, connectivity,
-    //         lowTime, highTime, lowVolume, highVolume);
-    // std::cout << taskGraph << '\n';
+    std::cout << "Desired time = " << DESIRED_TIME << '\n';
 
     const std::vector<int> rootTaskIndices = getRootTasks(taskGraph);
 
