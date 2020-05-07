@@ -432,12 +432,13 @@ struct Subtask {
 
 
 struct DrawingBasics {
-    std::pair<unsigned int, unsigned int> units;
+    std::pair<int, int> units;
     std::vector<int> trans_count;
+    int total_time;
 
-    DrawingBasics(const std::pair<unsigned int, unsigned int>& units,
-            const std::vector<int>& trans_count) :
-        units(units), trans_count(trans_count) {}
+    DrawingBasics(const std::pair<int, int>& units,
+            const std::vector<int>& trans_count, int total_time) :
+        units(units), trans_count(trans_count), total_time(total_time) {}
 };
 
 
@@ -479,7 +480,7 @@ std::ostream& operator<<(std::ostream& os, const Subtask& subtask) {
 
 // ==================== Methods for SDL ==================== //
 
-bool init(SDL_Window** window, SDL_Renderer** renderer, unsigned int screen_width, unsigned int screen_height) {
+bool init(SDL_Window** window, SDL_Renderer** renderer, int screen_width, int screen_height) {
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cout << "SDL could not initialize! SDL Error: " << SDL_GetError() << std::endl;
@@ -530,8 +531,7 @@ void close(SDL_Window* window, SDL_Renderer* renderer) {
 }
 
 
-DrawingBasics getDrawingBasics(const std::vector<Subtask>& subtasks,
-        unsigned int screen_width, unsigned int screen_height) {
+DrawingBasics getDrawingBasics(const std::vector<Subtask>& subtasks, int screen_width, int screen_height) {
     // Calculation of x_unit
     unsigned int max_x = 0;
     unsigned int max_proc_num = 0;
@@ -561,12 +561,12 @@ DrawingBasics getDrawingBasics(const std::vector<Subtask>& subtasks,
         }
     }
     // Values with margins
-    const unsigned int available_width = screen_width - 2 * screen_width / max_x;
-    const unsigned int available_height = screen_height - 2 * screen_height / sum_y;
+    const int available_width = screen_width - 2 * screen_width / max_x;
+    const int available_height = screen_height - 2 * screen_height / sum_y;
 
 
     return DrawingBasics({available_width / max_x, available_height / sum_y},
-            trans_count_max);
+            trans_count_max, max_x);
 }
 
 
@@ -574,11 +574,13 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     SDL_Window*   window   = nullptr; // The window we'll be rendering to
     SDL_Renderer* renderer = nullptr; // The window renderer
 
-    const unsigned int screen_width = 640;
-    const unsigned int screen_height = 480;
+    const int screen_width = 800;
+    const int screen_height = 500;
 
-    const auto& [units, trans_count] = getDrawingBasics(subtasks, screen_width, screen_height);
+    const auto& [units, trans_count, total_time] = getDrawingBasics(subtasks, screen_width, screen_height);
     const auto& [x_unit, y_unit] = units;
+    const int x_margin = x_unit;
+    const int y_margin = y_unit;
     // std::cout << "(x_unit = " << x_unit << ", y_unit = " << y_unit << ")" << std::endl;
 
     if (!init(&window, &renderer, screen_width, screen_height)) {
@@ -603,8 +605,6 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
     std::vector<DrawingElement> drawing_cores;
     std::vector<unsigned int> core_separators;
     std::vector<SDL_Rect> rectangles;
-    const unsigned int x_margin = x_unit;
-    const unsigned int y_margin = y_unit;
 
     for (const auto& subtask : subtasks) {
         const auto calculate_begin = [x_margin, x_unit](const auto& elem) {
@@ -655,23 +655,23 @@ void drawGraph(const std::vector<Subtask>& subtasks) {
             drawing_elements.emplace_back(std::move(rect), surface, texture, transmission_color);
         }
     }
-
-    // Lines for bold core separator
-    unsigned int curr_elem_count = 0;
+ 
+    int curr_elem_count = 0;
     for (unsigned int core = 0; core < trans_count.size(); core++) {
         if (trans_count[core] == -1) continue;
-        curr_elem_count += trans_count[core] + 2; // + 2 = 1 * 2 for the Subtask itself (weight == 2)
-        core_separators.push_back(y_margin + curr_elem_count * y_unit);
-
         // Collect core numbers to draw
         const std::string num = std::to_string(core);
-        const SDL_Rect rect{0, curr_elem_count * y_unit - y_unit, x_unit, 2 * y_unit};
+        const SDL_Rect rect{0, y_margin + curr_elem_count * y_unit, x_unit, 2 * y_unit};
         SDL_Surface*  surface = TTF_RenderText_Solid(font, num.c_str(), core_color);
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
         drawing_cores.emplace_back(std::move(rect), surface, texture, core_color);
+        // Lines for bold core separator and collect
+        curr_elem_count += trans_count[core] + 2; // + 2 = 1 * 2 for the Subtask itself (weight == 2)
+        core_separators.push_back(y_margin + curr_elem_count * y_unit);
     }
+
     // Collect ticks to draw
-    for (unsigned int i = x_unit, j = 1; i < (screen_width - x_unit); i += x_unit, j++) {
+    for (int i = x_unit, j = 1; i <= (total_time * x_unit); i += x_unit, j++) {
         const std::string num = std::to_string(j);
         const SDL_Rect rect{i, y_margin + curr_elem_count * y_unit, x_unit, y_unit};
         SDL_Surface*  surface = TTF_RenderText_Solid(font, num.c_str(), tick_color);

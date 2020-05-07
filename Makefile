@@ -25,7 +25,7 @@ all: cleanExe $(mainFileName)
 
 # Linker
 $(mainFileName): $(filesObj)
-	g++ $(COMPILER_FLAGS) $(OPTIMIZATION_FLAG) $(LANGUAGE_LEVEL) $(LINKER_FLAGS) $^ -o $@
+	g++ $(COMPILER_FLAGS) $(OPTIMIZATION_FLAG) $(LANGUAGE_LEVEL) $^ -o $@ $(LINKER_FLAGS)
 
 
 # Utils
