@@ -329,8 +329,8 @@ PlanningStuff planning(const TaskGraph& taskGraph, const std::vector<int>& rootT
             }
         }
 
-        std::cout << "Shall assign " << taskToAssign
-            << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
+        // std::cout << "Shall assign " << taskToAssign
+        //     << " with delta = " << taskGraph.tasks[taskToAssign].delta() << '\n';
 
         // Assign
         const auto [core, startTime] = determineAssignmentCore(taskToAssign);
@@ -771,15 +771,18 @@ int main() {
 
         // Display planning
         int coreId = 0;
+        std::cout << "============= Planning Begin =============\n";
         for (const auto& processor : cores) {
             std::cout << "==== Core " << coreId++ << '\n';
             for (const auto& [start, finish, taskId] : processor.processingTimeline) {
-                std::cout << "[" << taskId << "]: " << start << "--" << finish << '\n';
+                std::cout << "{" << taskId << "}: [" << start << ',' << finish << ')' << '\n';
             }
             for (const auto& [start, duration, src, dst] : processor.transferTimeline) {
-                std::cout << "From " << src << " to " << dst << " : " << start << "--" << start+duration << '\n';
+                std::cout << "From {" << src << "} to {" << dst
+                    << "} : [" << start << ','<< start+duration << ')' << '\n';
             }
         }
+        std::cout << "============= Planning End =============\n";
 
         int totalTime = 0;
         for (const auto& processor : cores) {
@@ -790,6 +793,8 @@ int main() {
         if (totalTime <= DESIRED_TIME) {
             std::cout << "The planning is sufficient.\n";
             break;
+        } else {
+            std::cout << "We didn't meet the desired time.\n";
         }
 
         // Find earliest of late finish time
